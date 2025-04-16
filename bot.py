@@ -1,43 +1,33 @@
 
-import os
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import requests
+import os
 from dotenv import load_dotenv
-import datetime
 
 load_dotenv()
 
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CANAL_VIP_ID = int(os.getenv("CANAL_VIP_ID"))
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ACCESS_TOKEN_MP = os.getenv("ACCESS_TOKEN_MP")
+ADMIN_ID = os.getenv("ADMIN_ID")
 
-bot = telebot.TeleBot(TOKEN)
+bot = telebot.TeleBot(BOT_TOKEN)
 
 @bot.message_handler(commands=['start'])
-def boas_vindas(message):
+def start(message):
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("✅ Já paguei", callback_data="paguei"),
-        InlineKeyboardButton("📲 Gerar outro Pix", callback_data="gerar_pix")
+        InlineKeyboardButton("💳 Plano Mensal - R$50", callback_data="plano_50_Mensal"),
+        InlineKeyboardButton("💎 Plano Anual - R$300", callback_data="plano_300_Anual")
     )
-    bot.send_message(message.chat.id, "👋 Seja bem-vindo!
-
-Envie a foto ou PDF do comprovante de pagamento:", reply_markup=markup)
+    texto = (
+        "✨💰 BEM-VINDO AO STAKE ALTA VIP 💰✨\n\n"
+        "Escolha seu plano abaixo para gerar o Pix e garantir seu acesso VIP."
+    )
+    bot.send_message(message.chat.id, texto, reply_markup=markup)
 
 @bot.message_handler(commands=['id'])
 def pegar_id(message):
-    bot.send_message(message.chat.id, f"🆔 ID deste chat: `{message.chat.id}`", parse_mode="Markdown")
+    bot.send_message(message.chat.id, f"`ID deste chat: `{message.chat.id}`", parse_mode="Markdown")
 
-@bot.message_handler(content_types=['document', 'photo'])
-def receber_comprovante(message):
-    bot.send_message(message.chat.id, "🔍 Verificando comprovante...")
-    # Aqui entraria a verificação automática via API de pagamentos
-
-    bot.send_message(message.chat.id, "✅ Pagamento confirmado! Em breve você será adicionado.")
-    bot.send_message(ADMIN_ID, f"📩 Novo pagamento detectado!
-Usuário: @{message.from_user.username}
-ID: `{message.chat.id}`", parse_mode="Markdown")
-
-print("🤖 Bot rodando...")
 bot.infinity_polling()
-    
