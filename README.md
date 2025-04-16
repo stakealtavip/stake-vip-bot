@@ -1,2 +1,3 @@
 # stake-vip-bot
-bot para stake alt vip com pagamento via pix e integração com render
+
+Bot do Telegram para pagamentos via Pix com verificação de comprovante e notificação ao admin.

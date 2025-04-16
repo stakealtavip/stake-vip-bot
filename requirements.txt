@@ -1,3 +1,2 @@
 pyTelegramBotAPI
-requests
-qrcode
+python-dotenv
