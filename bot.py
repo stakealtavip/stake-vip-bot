@@ -1,55 +1,109 @@
 import telebot
-from telebot import types
+import requests
+import uuid
+import base64
+import io
+import threading
+import time
 from datetime import datetime, timedelta
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# === CONFIGURAÇÕES ===
-TOKEN = 'SEU_TOKEN_DO_BOT_AQUI'
-CANAL_VIP = 'https://t.me/+2wtgut5HQ6czNzEx'  # link do canal VIP
-CANAL_VIP_ID = '@seu_canal_vip'  # ou use ID numérico com -100...
+# === CONFIG ===
+TOKEN = '7776075436:AAFdPlLaseQkmFo7CQNFauhg-Wf8Nzhd1x0'
+ACCESS_TOKEN_MP = 'APP_USR-7951666709252852-041313-728c6a5375bb603a60aaefcc56a776c4-583811745'
+ADMIN_ID = 842820136  # Seu ID para notificações
+TEMPO_EXPIRACAO_PIX = 5 * 60  # 5 minutos
+INTERVALO_VERIFICACAO = 20  # Segundos
 
 bot = telebot.TeleBot(TOKEN)
+pagamentos_pendentes = {}  # {payment_id: {'chat_id': int, 'username': str, 'plano': str}}
 
-# === COMANDO /START ===
+# === COMANDO /start ===
 @bot.message_handler(commands=['start'])
 def start(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("📩 Enviar Comprovante")
-    bot.send_message(message.chat.id, """
-💎✨ MENSAGEM PARA OS GVIPS ✨💎
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("💳 Plano Mensal - R$50", callback_data="plano_50_Mensal"),
+        InlineKeyboardButton("💎 Plano Anual - R$300", callback_data="plano_300_Anual")
+    )
+    texto = (
+        "💎✨ BEM-VINDO AO STAKE ALTA VIP ✨💎\n\n"
+        "Escolha seu plano abaixo para gerar o Pix e garantir seu acesso VIP."
+    )
+    bot.send_message(message.chat.id, texto, reply_markup=markup)
 
-Senhores,
+# === GERAR PIX ===
+def gerar_pix(valor, descricao):
+    url = 'https://api.mercadopago.com/v1/payments'
+    headers = {
+        'Authorization': f'Bearer {ACCESS_TOKEN_MP}',
+        'Content-Type': 'application/json',
+        'X-Idempotency-Key': str(uuid.uuid4())
+    }
+    payload = {
+        "transaction_amount": float(valor),
+        "description": descricao,
+        "payment_method_id": "pix",
+        "payer": {"email": f"cliente_{uuid.uuid4().hex[:8]}@email.com"}
+    }
+    r = requests.post(url, headers=headers, json=payload)
+    data = r.json()
+    if "point_of_interaction" in data:
+        qr_code = data["point_of_interaction"]["transaction_data"]["qr_code"]
+        qr_img = data["point_of_interaction"]["transaction_data"]["qr_code_base64"]
+        payment_id = data["id"]
+        return payment_id, qr_code, qr_img
+    return None, None, None
 
-Sejam muito bem-vindos ao GVIPS, o grupo onde o jogo é de alto nível e os resultados falam mais alto que promessas. Aqui não lidamos com sorte — lidamos com estratégia, informação privilegiada e decisões inteligentes. 🧠📈
+# === VERIFICAR STATUS DO PAGAMENTO ===
+def verificar_status(payment_id):
+    url = f"https://api.mercadopago.com/v1/payments/{payment_id}"
+    headers = {"Authorization": f"Bearer {ACCESS_TOKEN_MP}"}
+    r = requests.get(url, headers=headers)
+    data = r.json()
+    return data.get("status")
 
-Preparem-se para uma nova era de lucros.
-O jogo mudou, e vocês estão no comando. 🎯👑
-""", reply_markup=markup)
+# === VERIFICAÇÃO AUTOMÁTICA EM BACKGROUND ===
+def monitorar_pagamentos():
+    while True:
+        time.sleep(INTERVALO_VERIFICACAO)
+        for payment_id in list(pagamentos_pendentes.keys()):
+            status = verificar_status(payment_id)
+            if status == 'approved':
+                info = pagamentos_pendentes.pop(payment_id)
+                bot.send_message(info['chat_id'], "✅ Pagamento aprovado! Aguarde ser adicionado ao grupo VIP.")
+                aviso = f"🔔 Novo pagamento confirmado:\nUsuário: @{info['username']}\nPlano: {info['plano']}"
+                bot.send_message(ADMIN_ID, aviso)
 
-# === VERIFICAR COMPROVANTE (foto ou documento) ===
-@bot.message_handler(content_types=['photo', 'document'])
-def verificar_comprovante(message):
-    try:
-        bot.send_message(message.chat.id, "✅ Comprovante recebido! Gerando acesso...")
-        liberar_acesso(message.chat.id)
-    except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Erro ao processar o comprovante: {e}")
+threading.Thread(target=monitorar_pagamentos, daemon=True).start()
 
-# === LIBERAR ACESSO COM LINK TEMPORÁRIO ===
-def liberar_acesso(chat_id):
-    try:
-        tempo_expiracao = datetime.now() + timedelta(minutes=5)
-        link = bot.create_chat_invite_link(chat_id=CANAL_VIP_ID, expire_date=int(tempo_expiracao.timestamp()), member_limit=1)
+# === CALLBACK DOS BOTÕES ===
+@bot.callback_query_handler(func=lambda call: True)
+def callback(call):
+    if call.data.startswith("plano_"):
+        _, valor, plano = call.data.split("_")
+        valor = float(valor)
+        descricao = f"{plano} - R${valor}"
+        payment_id, codigo, qr_img = gerar_pix(valor, descricao)
 
-        teclado = types.InlineKeyboardMarkup()
-        botao = types.InlineKeyboardButton("🎟️ Entrar no Grupo VIP", url=link.invite_link)
-        teclado.add(botao)
+        if payment_id:
+            pagamentos_pendentes[payment_id] = {
+                'chat_id': call.message.chat.id,
+                'username': call.from_user.username or 'sem_username',
+                'plano': plano
+            }
+            img = io.BytesIO(base64.b64decode(qr_img))
+            img.name = "pix.png"
+            bot.send_photo(call.message.chat.id, img, caption=f"📸 Escaneie ou copie:\n`{codigo}`", parse_mode="Markdown")
+            bot.send_message(call.message.chat.id, "⏳ Estamos monitorando seu pagamento. O código expira em 5 minutos.")
+        else:
+            bot.send_message(call.message.chat.id, "❌ Erro ao gerar Pix. Tente novamente.")
 
-        bot.send_message(chat_id, "✅ Pagamento confirmado! Clique abaixo para acessar o canal VIP:", reply_markup=teclado)
+# === COMANDO /id (opcional) ===
+@bot.message_handler(commands=['id'])
+def pegar_id(message):
+    bot.send_message(message.chat.id, f"🆔 ID deste chat: `{message.chat.id}`", parse_mode="Markdown")
 
-    except Exception as e:
-        bot.send_message(chat_id, f"❌ Erro ao gerar link de acesso: {e}")
-
-# === INICIAR BOT ===
-if __name__ == "__main__":
-    print("🤖 Bot está rodando... Aguarde comandos.")
-    bot.infinity_polling()
+# === INICIAR O BOT ===
+print("🤖 Bot rodando...")
+bot.infinity_polling()
