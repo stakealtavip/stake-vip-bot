@@ -1,86 +1,75 @@
 import telebot
 import requests
+import uuid
+import json
 import os
-from flask import Flask, request
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from dotenv import load_dotenv
 
-# Variáveis de ambiente
+load_dotenv()
+
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ACCESS_TOKEN_MP = os.getenv("ACCESS_TOKEN_MP")
-ADMIN_ID = os.getenv("ADMIN_ID")
+ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
 bot = telebot.TeleBot(BOT_TOKEN)
-app = Flask(__name__)
 
-# Função para gerar o Pix
-def gerar_pix(valor):
+# Função para gerar pagamento no Mercado Pago
+def gerar_pagamento(valor):
     url = "https://api.mercadopago.com/v1/payments"
     headers = {
         "Authorization": f"Bearer {ACCESS_TOKEN_MP}",
         "Content-Type": "application/json"
     }
-    payload = {
+    body = {
         "transaction_amount": float(valor),
-        "description": f"Plano R${valor}",
+        "description": "Acesso VIP Telegram",
         "payment_method_id": "pix",
-        "payer": {
-            "email": "pagador@email.com",
-            "first_name": "Cliente",
-            "last_name": "Bot"
-        }
+        "payer": {"email": f"{uuid.uuid4().hex[:8]}@email.com"}
     }
 
-    response = requests.post(url, headers=headers, json=payload)
-    if response.status_code == 201:
-        dados = response.json()
-        qr_code = dados['point_of_interaction']['transaction_data']['qr_code']
-        return qr_code
+    response = requests.post(url, headers=headers, data=json.dumps(body))
+    if response.ok:
+        data = response.json()
+        return {
+            "qr_code": data["point_of_interaction"]["transaction_data"]["qr_code"],
+            "qr_code_base64": data["point_of_interaction"]["transaction_data"]["qr_code_base64"],
+            "id": data["id"]
+        }
     else:
+        print("Erro ao gerar Pix:", response.text)
         return None
 
-# Comando /start
+# Início /start
 @bot.message_handler(commands=["start"])
 def start(message):
-    texto = (
-        "✨ 👑 BEM-VINDO AO STAKE ALTA VIP 👑 ✨\n\n"
-        "Escolha seu plano abaixo para gerar o Pix e garantir seu acesso VIP."
+    markup = InlineKeyboardMarkup()
+    markup.row(
+        InlineKeyboardButton("📄 Plano Mensal - R$50", callback_data="plano_50"),
+        InlineKeyboardButton("💎 Plano Anual - R$300", callback_data="plano_300")
     )
-    markup = telebot.types.InlineKeyboardMarkup()
-    markup.add(
-        telebot.types.InlineKeyboardButton("📄 Plano Mensal - R$50", callback_data="plano_50"),
-        telebot.types.InlineKeyboardButton("💎 Plano Anual - R$300", callback_data="plano_300")
+    bot.send_message(
+        message.chat.id,
+        "✨👑 BEM-VINDO AO STAKE ALTA VIP 👑✨\n\nEscolha seu plano abaixo para gerar o Pix e garantir seu acesso VIP.",
+        reply_markup=markup
     )
-    bot.send_message(message.chat.id, texto, reply_markup=markup)
 
-# Botão pressionado
-@bot.callback_query_handler(func=lambda call: True)
-def callback_query(call):
-    if call.data == "plano_50":
-        valor = 50
-    elif call.data == "plano_300":
-        valor = 300
-    else:
-        bot.answer_callback_query(call.id, "Plano inválido.")
-        return
-
-    qr = gerar_pix(valor)
-    if qr:
-        bot.send_message(call.message.chat.id, f"✅ Pix gerado para R${valor}:\n\n🔢 Copie e cole o código abaixo:\n\n`{qr}`", parse_mode="Markdown")
+# Recebe botão
+@bot.callback_query_handler(func=lambda call: call.data.startswith("plano_"))
+def gerar_pix(call):
+    valor = call.data.split("_")[1]
+    pagamento = gerar_pagamento(valor)
+    if pagamento:
+        bot.send_message(call.message.chat.id, f"🔐 Copie o código Pix abaixo e pague via seu app bancário:\n\n`{pagamento['qr_code']}`", parse_mode="Markdown")
+        bot.send_photo(call.message.chat.id, f"https://api.qrserver.com/v1/create-qr-code/?data={pagamento['qr_code']}&size=300x300")
+        bot.send_message(ADMIN_ID, f"📥 Nova tentativa de pagamento de R${valor}.\nID da transação: {pagamento['id']}")
     else:
         bot.send_message(call.message.chat.id, "❌ Erro ao gerar o Pix. Tente novamente mais tarde.")
 
-# Webhook principal
-@app.route("/", methods=["POST"])
-def receive_update():
-    json_str = request.get_data().decode("utf-8")
-    update = telebot.types.Update.de_json(json_str)
-    bot.process_new_updates([update])
-    return "ok", 200
+# /id para debug
+@bot.message_handler(commands=["id"])
+def enviar_id(message):
+    bot.reply_to(message, f"Este chat ID é: `{message.chat.id}`", parse_mode="Markdown")
 
-# Endpoint para testar se está ativo
-@app.route("/", methods=["GET"])
-def index():
-    return "Bot está rodando!", 200
-
-# Inicia localmente (opcional, para testes locais)
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+print("BOT ONLINE - MODO POLLING ✅")
+bot.infinity_polling()
