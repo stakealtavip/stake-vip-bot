@@ -1,1 +1,3 @@
-bot.py
+.env
+__pycache__/
+*.pyc
