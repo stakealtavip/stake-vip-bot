@@ -67,4 +67,5 @@ def callback_query(call):
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Erro ao gerar o Pix: {str(e)}")
 
-bot.infinity_polling()
+if __name__ == '__main__':
+    bot.polling(none_stop=True)
