@@ -1,1 +1,4 @@
-web: python bot.py
+pyTelegramBotAPI
+requests
+qrcode
+
