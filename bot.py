@@ -15,7 +15,7 @@ def boas_vindas(message):
     botao1 = InlineKeyboardButton("✅ Já paguei", callback_data="paguei")
     botao2 = InlineKeyboardButton("📲 Gerar outro Pix", callback_data="gerar_pix")
     markup.add(botao1, botao2)
-    bot.send_message(message.chat.id, "👋 Seja bem-vindo!
+    bot.send_message(message.chat.id, "👋 Seja bem-vindo!"
 
 Escolha uma opção abaixo:", reply_markup=markup)
 
