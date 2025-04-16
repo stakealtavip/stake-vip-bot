@@ -18,7 +18,7 @@ if not TELEGRAM_TOKEN or not ACCESS_TOKEN_MP:
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-CANAL_VIP = "@stakealtavip"  # Canal VIP que receberá os usuários
+CANAL_VIP = "@stakealtavip"
 
 # Boas-vindas automáticas para novos membros no grupo
 @bot.message_handler(content_types=['new_chat_members'])
@@ -35,6 +35,43 @@ def boas_vindas_grupo(message):
         "🚨 Importante: Aposte com responsabilidade. Nosso grupo é voltado para pessoas que entendem que apostas esportivas exigem paciência, controle emocional e visão de longo prazo. Não prometemos ganhos fáceis — entregamos estratégia e consistência."
     )
     bot.send_message(message.chat.id, texto_boas_vindas)
+
+# Mensagem inicial do comando /start
+@bot.message_handler(commands=['start'])
+def start(message):
+    chat_id = message.chat.id
+
+    texto = (
+        "🔥 *Seja bem-vindo(a) ao Stake Alta VIP!* 🔥\n\n"
+        "🎯 Aqui você recebe os melhores sinais de apostas esportivas e slots todos os dias!\n"
+        "✅ Análises precisas\n"
+        "✅ Gestão de banca inteligente\n"
+        "✅ Resultados transparentes e consistentes\n\n"
+        "💎✨ *MENSAGEM PARA OS GVIPS* ✨💎\n\n"
+        "Senhores,\n\n"
+        "Sejam muito bem-vindos ao *GVIPS*, o grupo onde o jogo é de alto nível e os resultados falam mais alto que promessas. Aqui não lidamos com sorte — lidamos com estratégia, informação privilegiada e decisões inteligentes. 🧠📈\n\n"
+        "Vocês fazem parte de uma elite: investidores, empreendedores, milionários que sabem onde estão pisando. 🏆💼\n"
+        "E por isso, o tratamento aqui é diferente:\n"
+        "🔒 Entradas exclusivas\n"
+        "📊 Análises cirúrgicas\n"
+        "🛡 Gestão de risco profissional\n"
+        "🔥 Oportunidades únicas\n\n"
+        "Nada aqui é genérico. Tudo é pensado para quem já está no topo — e quer continuar crescendo. 🚀💰\n\n"
+        "Preparem-se para uma nova era de lucros.\n"
+        "O jogo mudou, e vocês estão no comando. 🎯👑\n\n"
+        "_Com respeito e estratégia,_\n"
+        "*CLUBE DA STAKE ALTA GVIPS — Aqui, lucro é estilo de vida.* 💼💸"
+    )
+
+    teclado = InlineKeyboardMarkup()
+    planos = [
+        ("Mensal - R$50", "50_Mensal"),
+        ("Vitalício - R$100", "100_Vitalicio")
+    ]
+    for texto_botao, callback_data in planos:
+        teclado.add(InlineKeyboardButton(text=texto_botao, callback_data=callback_data))
+
+    bot.send_message(chat_id, texto, parse_mode='Markdown', reply_markup=teclado)
 
 # Geração de pagamento Pix via Mercado Pago
 def gerar_pix_mp(valor, descricao):
@@ -60,27 +97,7 @@ def gerar_pix_mp(valor, descricao):
         return transacao["qr_code_base64"], transacao["qr_code"], transacao.get("ticket_url", "")
     return None, None, None
 
-# Comando /start
-@bot.message_handler(commands=['start'])
-def start(message):
-    texto = (
-        "Stake Alta VIP\n\n"
-        "O canal com as melhores entradas de apostas esportivas e slots.\n\n"
-        "Escolha um plano para obter acesso ao grupo VIP."
-    )
-
-    teclado = InlineKeyboardMarkup()
-    planos = [
-        ("Mensal - R$50", "50_Mensal"),
-        ("Vitalício - R$100", "100_Vitalicio")
-    ]
-
-    for texto_botao, callback_data in planos:
-        teclado.add(InlineKeyboardButton(text=texto_botao, callback_data=callback_data))
-
-    bot.send_message(message.chat.id, texto, parse_mode='Markdown', reply_markup=teclado)
-
-# Lida com os botões de plano
+# Resposta aos botões de plano
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     data = call.data
@@ -96,12 +113,12 @@ def callback_query(call):
     except Exception as e:
         bot.send_message(call.message.chat.id, f"Ocorreu um erro: {str(e)}")
 
-# Envia o QR code e Pix copia e cola
+# Envia QR e Pix copia e cola
 def enviar_pix(chat_id, valor, descricao):
     qr_base64, copiaecola, ticket_url = gerar_pix_mp(valor, descricao)
 
     if copiaecola:
-        bot.send_message(chat_id, f"Pix gerado com sucesso!\n\nCódigo copia e cola:\n`{copiaecola}`", parse_mode='Markdown')
+        bot.send_message(chat_id, f"*Pix gerado com sucesso!*\n\nCódigo copia e cola:\n`{copiaecola}`", parse_mode='Markdown')
 
         imagem_bytes = base64.b64decode(qr_base64)
         imagem = io.BytesIO(imagem_bytes)
@@ -114,22 +131,22 @@ def enviar_pix(chat_id, valor, descricao):
         teclado.add(InlineKeyboardButton("Já paguei", callback_data=f"conf_{valor}_{descricao}"))
         teclado.add(InlineKeyboardButton("Gerar novo Pix", callback_data=f"novo_{valor}_{descricao}"))
 
-        bot.send_message(chat_id, "Este código é válido por 5 minutos.\nSe expirar, clique em Gerar novo Pix.", parse_mode='Markdown', reply_markup=teclado)
+        bot.send_message(chat_id, "Este código é válido por 5 minutos.\nSe expirar, clique em *Gerar novo Pix*.", parse_mode='Markdown', reply_markup=teclado)
     else:
         bot.send_message(chat_id, "Erro ao gerar Pix. Tente novamente.")
 
-# Solicita envio de comprovante
+# Solicita envio do comprovante
 def solicitar_comprovante(call):
-    bot.send_message(call.message.chat.id, "Envie uma foto ou arquivo do comprovante de pagamento:", parse_mode='Markdown')
+    bot.send_message(call.message.chat.id, "Envie uma *foto ou arquivo* do comprovante de pagamento:", parse_mode='Markdown')
     bot.register_next_step_handler(call.message, handle_comprovante_pagamento)
 
-# Trata o comprovante enviado
+# Lida com o comprovante enviado
 def handle_comprovante_pagamento(message):
     if message.content_type in ['photo', 'document']:
         bot.send_message(message.chat.id, "Comprovante recebido! Verificando pagamento...")
         liberar_acesso(message.chat.id)
     else:
-        bot.send_message(message.chat.id, "Por favor, envie o comprovante como imagem ou arquivo.", parse_mode='Markdown')
+        bot.send_message(message.chat.id, "Por favor, envie o comprovante como *imagem ou arquivo*.", parse_mode='Markdown')
 
 # Libera acesso ao canal VIP com link único
 def liberar_acesso(chat_id):
