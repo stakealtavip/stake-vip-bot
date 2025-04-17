@@ -1,142 +1,96 @@
 import telebot
 from telebot import types
 import uuid
-import base64
 import requests
-import io
 import os
 from dotenv import load_dotenv
-import datetime
+import time
 
 load_dotenv()
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 MERCADO_PAGO_TOKEN = os.getenv("ACCESS_TOKEN_MP")
-CANAL_USERNAME = "stakealtavip"  # Nome de usuário do canal (sem @)
+ADMIN_ID = os.getenv("ADMIN_ID")  # ID do admin para receber notificações
 
 bot = telebot.TeleBot(TOKEN)
 
-def gerar_link_convite_temporario(chat_id):
-    try:
-        response = requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/createChatInviteLink",
-            json={
-                "chat_id": f"@{CANAL_USERNAME}",
-                "expire_date": int(datetime.datetime.now().timestamp()) + 300,
-                "member_limit": 1
-            }
-        )
-        data = response.json()
-        if data.get("ok"):
-            return data["result"]["invite_link"]
-        else:
-            print("Erro ao gerar link:", data)
-            return None
-    except Exception as e:
-        print("Exceção ao gerar link:", e)
-        return None
-
 def gerar_pix_mp(valor, descricao):
-    url = 'https://api.mercadopago.com/v1/payments'
+    url = "https://api.mercadopago.com/v1/payments"
     headers = {
-        'Authorization': f'Bearer {MERCADO_PAGO_TOKEN}',
-        'Content-Type': 'application/json',
-        'X-Idempotency-Key': str(uuid.uuid4())
+        "Authorization": f"Bearer {MERCADO_PAGO_TOKEN}",
+        "Content-Type": "application/json",
+        "X-Idempotency-Key": str(uuid.uuid4())
     }
     payload = {
         "transaction_amount": float(valor),
         "description": descricao,
         "payment_method_id": "pix",
-        "payer": {"email": "comprador@email.com"}
+        "payer": {
+            "email": f"{uuid.uuid4().hex[:6]}@email.com"
+        }
     }
     response = requests.post(url, json=payload, headers=headers)
-    dados = response.json()
-    if "point_of_interaction" in dados:
-        transacao = dados["point_of_interaction"]["transaction_data"]
-        return transacao["qr_code_base64"], transacao["qr_code"], transacao.get("ticket_url", "")
-    return None, None, None
+    data = response.json()
+    if "point_of_interaction" in data:
+        transacao = data["point_of_interaction"]["transaction_data"]
+        return data["id"], transacao["qr_code"], transacao["qr_code_base64"]
+    else:
+        return None, None, None
+
+def verificar_pagamento(payment_id):
+    url = f"https://api.mercadopago.com/v1/payments/{payment_id}"
+    headers = {"Authorization": f"Bearer {MERCADO_PAGO_TOKEN}"}
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        status = response.json().get("status")
+        return status == "approved"
+    return False
 
 @bot.message_handler(commands=["start"])
-def start(message):
-    texto_boasvindas = (
-        "🎯 Membros novos, sejam bem-vindos ao nosso *Grupo de Apostas Profissionais*!\n\n"
-        "📊 O que você encontrará aqui:\n"
-        "✅ *Sinais diários* com odds reais\n"
-        "✅ *Análises* dos slots e jogos ao vivo\n"
-        "✅ *Gestão de banca* recomendada\n"
-        "✅ *Resultados* transparentes\n"
-        "✅ *Suporte* para dúvidas\n\n"
-        "🚨 *Aposte com responsabilidade.* Nosso foco é *lucro constante com disciplina.*\n\n"
-        "💎✨ *MENSAGEM PARA OS GVIPS* ✨💎\n\n"
-        "Senhores, sejam bem-vindos ao *GVIPS*, o grupo onde *o jogo é de alto nível*.\n"
-        "📈 Aqui lidamos com estratégia, não com sorte.\n\n"
-        "🏆 Vocês fazem parte da elite: investidores e empreendedores que sabem o que querem.\n\n"
+def boas_vindas(message):
+    texto = (
+        "👋 *Bem-vindo(a) ao Clube da Stake Alta!* \n\n"
+        "💎✨ MENSAGEM PARA OS GVIPS ✨💎\n\n"
+        "Sejam muito bem-vindos ao GVIPS, o grupo onde o jogo é de alto nível e os resultados falam mais alto que promessas.\n\n"
+        "Aqui você encontra:\n"
         "🔒 Entradas exclusivas\n📊 Análises cirúrgicas\n🛡 Gestão de risco\n🔥 Oportunidades únicas\n\n"
-        "Preparem-se para uma nova era de lucros! 💰"
+        "🚨 *Escolha um plano abaixo para começar:*"
     )
-
-    bot.send_message(message.chat.id, texto_boasvindas, parse_mode="Markdown")
-
-    teclado = types.InlineKeyboardMarkup()
-    teclado.add(
-        types.InlineKeyboardButton("💸 Mensal - R$50", callback_data="50_Mensal"),
-        types.InlineKeyboardButton("💎 Vitalício - R$100", callback_data="100_Vitalicio")
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton("Mensal - R$50", callback_data="plano_50_Mensal"),
+        types.InlineKeyboardButton("Vitalício - R$100", callback_data="plano_100_Vitalício")
     )
-    bot.send_message(message.chat.id, "Escolha um plano para gerar o Pix:", reply_markup=teclado)
+    bot.send_message(message.chat.id, texto, parse_mode="Markdown", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: True)
-def callback_query(call):
-    data = call.data
+def processar_plano(call):
     try:
-        if data.startswith("conf_"):
-            solicitar_comprovante(call)
-        elif data.startswith("novo_"):
-            partes = data[5:].split("_", 1)
-            enviar_pix(call.message.chat.id, float(partes[0]), partes[1])
+        dados = call.data.split("_")
+        valor = float(dados[1])
+        descricao = dados[2]
+
+        payment_id, copiaecola, qr_base64 = gerar_pix_mp(valor, descricao)
+        if payment_id:
+            imagem_bytes = requests.get(f"https://api.qrserver.com/v1/create-qr-code/?data={copiaecola}").content
+            bot.send_photo(call.message.chat.id, imagem_bytes, caption=f"📌 *Plano:* {descricao}\n💰 *Valor:* R${valor}\n\n✅ Pague o Pix usando o QR Code ou copie o código abaixo:", parse_mode="Markdown")
+            bot.send_message(call.message.chat.id, f"🔁 Código copia e cola:\n`{copiaecola}`", parse_mode="Markdown")
+
+            bot.send_message(call.message.chat.id, "⏳ Verificando pagamento automaticamente... aguarde.")
+
+            for i in range(10):  # Tenta por 2 minutos
+                if verificar_pagamento(payment_id):
+                    nome = call.from_user.first_name
+                    bot.send_message(call.message.chat.id, "✅ Pagamento aprovado! Você receberá o acesso VIP em instantes.")
+                    bot.send_message(ADMIN_ID, f"📢 {nome} realizou o pagamento!\nPlano escolhido: *{descricao}* ✅", parse_mode="Markdown")
+                    return
+                time.sleep(12)
+
+            bot.send_message(call.message.chat.id, "⏱ Ainda não identificamos o pagamento. Caso já tenha pago, aguarde ou entre em contato com o suporte.")
         else:
-            partes = data.split("_", 1)
-            enviar_pix(call.message.chat.id, float(partes[0]), partes[1])
+            bot.send_message(call.message.chat.id, "❌ Erro ao gerar Pix.")
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"Ocorreu um erro: {str(e)}")
+        bot.send_message(call.message.chat.id, f"❌ Ocorreu um erro: {str(e)}")
 
-def enviar_pix(chat_id, valor, descricao):
-    qr_base64, copiaecola, ticket_url = gerar_pix_mp(valor, descricao)
-    if copiaecola:
-        bot.send_message(chat_id, f"🔐 *Pix gerado com sucesso!*\n\n🔢 Código copia e cola:\n`{copiaecola}`", parse_mode='Markdown')
-        imagem_bytes = base64.b64decode(qr_base64)
-        imagem = io.BytesIO(imagem_bytes)
-        imagem.name = "qrcode.png"
-        bot.send_photo(chat_id, imagem)
-
-        teclado = types.InlineKeyboardMarkup()
-        url_pagamento = ticket_url or f"https://pixbrasil.com.br/pix.html?payload={copiaecola}"
-        teclado.add(types.InlineKeyboardButton("✅ Pagar Pix", url=url_pagamento))
-        teclado.add(types.InlineKeyboardButton("📤 Já paguei", callback_data=f"conf_{valor}_{descricao}"))
-        teclado.add(types.InlineKeyboardButton("🔁 Gerar novo Pix", callback_data=f"novo_{valor}_{descricao}"))
-
-        bot.send_message(chat_id, "⏳ Este código é válido por 5 minutos. Se expirar, clique em *Gerar novo Pix*.", parse_mode='Markdown', reply_markup=teclado)
-    else:
-        bot.send_message(chat_id, "❌ Erro ao gerar Pix. Tente novamente.")
-
-def solicitar_comprovante(call):
-    bot.send_message(call.message.chat.id, "📎 Envie uma foto ou arquivo do comprovante de pagamento:", parse_mode='Markdown')
-    bot.register_next_step_handler(call.message, handle_comprovante_pagamento)
-
-@bot.message_handler(content_types=["photo", "document"])
-def handle_comprovante_pagamento(message):
-    if message.content_type in ["photo", "document"]:
-        bot.send_message(message.chat.id, "Comprovante recebido! ✅ Verificando pagamento...")
-        liberar_acesso(message.chat.id)
-    else:
-        bot.send_message(message.chat.id, "❌ Envie o comprovante como imagem ou arquivo.")
-
-def liberar_acesso(chat_id):
-    try:
-        link = bot.create_chat_invite_link(chat_id=f"@{CANAL_USERNAME}", member_limit=1, expire_date=int(datetime.datetime.now().timestamp()) + 300)
-        bot.send_message(chat_id, "🔓 Pagamento confirmado!\nClique abaixo para acessar o canal VIP:", reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🚪 Acessar Canal VIP", url=link.invite_link)))
-    except Exception as e:
-        bot.send_message(chat_id, f"❌ Erro ao gerar link: {str(e)}")
-
-# Iniciar bot
-print("Bot está rodando...")
+print("Bot rodando...")
 bot.infinity_polling()
