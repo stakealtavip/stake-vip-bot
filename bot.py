@@ -1,29 +1,45 @@
 import telebot
-import requests
+from telebot import types
 import uuid
 import base64
+import requests
 import io
 import os
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from dotenv import load_dotenv
+import datetime
 
-# Carrega variáveis do .env
 load_dotenv()
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-ACCESS_TOKEN_MP = os.getenv("ACCESS_TOKEN_MP")
 
-if not TELEGRAM_TOKEN or not ACCESS_TOKEN_MP:
-    raise Exception("Erro: TELEGRAM_TOKEN ou ACCESS_TOKEN_MP não encontrados no .env.")
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+MERCADO_PAGO_TOKEN = os.getenv("ACCESS_TOKEN_MP")
+CANAL_USERNAME = "stakealtavip"  # Nome de usuário do canal (sem @)
 
-bot = telebot.TeleBot(TELEGRAM_TOKEN)
+bot = telebot.TeleBot(TOKEN)
 
-CANAL_VIP = "@stakealtavip"  # Substitua se usar ID numérico
+def gerar_link_convite_temporario(chat_id):
+    try:
+        response = requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/createChatInviteLink",
+            json={
+                "chat_id": f"@{CANAL_USERNAME}",
+                "expire_date": int(datetime.datetime.now().timestamp()) + 300,
+                "member_limit": 1
+            }
+        )
+        data = response.json()
+        if data.get("ok"):
+            return data["result"]["invite_link"]
+        else:
+            print("Erro ao gerar link:", data)
+            return None
+    except Exception as e:
+        print("Exceção ao gerar link:", e)
+        return None
 
-# Função: gerar pagamento via Pix Mercado Pago
 def gerar_pix_mp(valor, descricao):
     url = 'https://api.mercadopago.com/v1/payments'
     headers = {
-        'Authorization': f'Bearer {ACCESS_TOKEN_MP}',
+        'Authorization': f'Bearer {MERCADO_PAGO_TOKEN}',
         'Content-Type': 'application/json',
         'X-Idempotency-Key': str(uuid.uuid4())
     }
@@ -40,36 +56,34 @@ def gerar_pix_mp(valor, descricao):
         return transacao["qr_code_base64"], transacao["qr_code"], transacao.get("ticket_url", "")
     return None, None, None
 
-# Mensagem de boas-vindas + botões
-@bot.message_handler(commands=['start'])
+@bot.message_handler(commands=["start"])
 def start(message):
-    texto = (
-        "🎯 *Seja bem-vindo ao Grupo de Apostas Profissionais da Stake Alta!*\n\n"
-        "Aqui você terá acesso a entradas selecionadas com base em análise técnica, "
-        "gestão de banca responsável e suporte diário.\n\n"
+    texto_boasvindas = (
+        "🎯 Membros novos, sejam bem-vindos ao nosso *Grupo de Apostas Profissionais*!\n\n"
         "📊 O que você encontrará aqui:\n"
-        "✅ Sinais diários com odds reais e verificadas\n"
-        "✅ Análises dos slots e jogos ao vivo que estão pagando\n"
-        "✅ Gestão de banca recomendada\n"
-        "✅ Resultados transparentes\n"
-        "✅ Suporte para dúvidas e orientações\n\n"
-        "🚨 Aposte com responsabilidade: nosso grupo é para quem busca estratégia e consistência.\n\n"
+        "✅ *Sinais diários* com odds reais\n"
+        "✅ *Análises* dos slots e jogos ao vivo\n"
+        "✅ *Gestão de banca* recomendada\n"
+        "✅ *Resultados* transparentes\n"
+        "✅ *Suporte* para dúvidas\n\n"
+        "🚨 *Aposte com responsabilidade.* Nosso foco é *lucro constante com disciplina.*\n\n"
         "💎✨ *MENSAGEM PARA OS GVIPS* ✨💎\n\n"
-        "Senhores, bem-vindos ao GVIPS — onde o jogo é de alto nível e os resultados falam mais alto que promessas.\n"
-        "🔒 Entradas exclusivas\n📊 Análises cirúrgicas\n🛡 Gestão de risco profissional\n🔥 Oportunidades únicas\n\n"
-        "Preparem-se para uma nova era de lucros. O jogo mudou, e vocês estão no comando. 🎯👑"
+        "Senhores, sejam bem-vindos ao *GVIPS*, o grupo onde *o jogo é de alto nível*.\n"
+        "📈 Aqui lidamos com estratégia, não com sorte.\n\n"
+        "🏆 Vocês fazem parte da elite: investidores e empreendedores que sabem o que querem.\n\n"
+        "🔒 Entradas exclusivas\n📊 Análises cirúrgicas\n🛡 Gestão de risco\n🔥 Oportunidades únicas\n\n"
+        "Preparem-se para uma nova era de lucros! 💰"
     )
-    teclado = InlineKeyboardMarkup()
-    planos = [
-        ("Mensal - R$50", "50_Mensal"),
-        ("Vitalício - R$100", "100_Vitalicio")
-    ]
-    for texto_botao, callback_data in planos:
-        teclado.add(InlineKeyboardButton(text=texto_botao, callback_data=callback_data))
 
-    bot.send_message(message.chat.id, texto, parse_mode='Markdown', reply_markup=teclado)
+    bot.send_message(message.chat.id, texto_boasvindas, parse_mode="Markdown")
 
-# Trata cliques nos botões
+    teclado = types.InlineKeyboardMarkup()
+    teclado.add(
+        types.InlineKeyboardButton("💸 Mensal - R$50", callback_data="50_Mensal"),
+        types.InlineKeyboardButton("💎 Vitalício - R$100", callback_data="100_Vitalicio")
+    )
+    bot.send_message(message.chat.id, "Escolha um plano para gerar o Pix:", reply_markup=teclado)
+
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     data = call.data
@@ -83,56 +97,46 @@ def callback_query(call):
             partes = data.split("_", 1)
             enviar_pix(call.message.chat.id, float(partes[0]), partes[1])
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ Erro: {str(e)}")
+        bot.send_message(call.message.chat.id, f"Ocorreu um erro: {str(e)}")
 
-# Envia Pix (QR + código) com botões
 def enviar_pix(chat_id, valor, descricao):
     qr_base64, copiaecola, ticket_url = gerar_pix_mp(valor, descricao)
     if copiaecola:
-        bot.send_message(chat_id, f"✅ *Pix gerado com sucesso!*\n\n💸 *Código copia e cola:*\n`{copiaecola}`", parse_mode='Markdown')
-
+        bot.send_message(chat_id, f"🔐 *Pix gerado com sucesso!*\n\n🔢 Código copia e cola:\n`{copiaecola}`", parse_mode='Markdown')
         imagem_bytes = base64.b64decode(qr_base64)
         imagem = io.BytesIO(imagem_bytes)
         imagem.name = "qrcode.png"
         bot.send_photo(chat_id, imagem)
 
-        teclado = InlineKeyboardMarkup()
+        teclado = types.InlineKeyboardMarkup()
         url_pagamento = ticket_url or f"https://pixbrasil.com.br/pix.html?payload={copiaecola}"
-        teclado.add(InlineKeyboardButton("🔗 Pagar Pix", url=url_pagamento))
-        teclado.add(InlineKeyboardButton("✅ Já paguei", callback_data=f"conf_{valor}_{descricao}"))
-        teclado.add(InlineKeyboardButton("🔁 Gerar novo Pix", callback_data=f"novo_{valor}_{descricao}"))
+        teclado.add(types.InlineKeyboardButton("✅ Pagar Pix", url=url_pagamento))
+        teclado.add(types.InlineKeyboardButton("📤 Já paguei", callback_data=f"conf_{valor}_{descricao}"))
+        teclado.add(types.InlineKeyboardButton("🔁 Gerar novo Pix", callback_data=f"novo_{valor}_{descricao}"))
 
-        bot.send_message(chat_id, "⏳ *Este código é válido por 5 minutos.*\nSe expirar, clique em *Gerar novo Pix* para atualizar.", parse_mode='Markdown', reply_markup=teclado)
+        bot.send_message(chat_id, "⏳ Este código é válido por 5 minutos. Se expirar, clique em *Gerar novo Pix*.", parse_mode='Markdown', reply_markup=teclado)
     else:
         bot.send_message(chat_id, "❌ Erro ao gerar Pix. Tente novamente.")
 
-# Solicita comprovante
 def solicitar_comprovante(call):
-    bot.send_message(call.message.chat.id, "📎 Envie a foto ou arquivo do comprovante de pagamento:")
+    bot.send_message(call.message.chat.id, "📎 Envie uma foto ou arquivo do comprovante de pagamento:", parse_mode='Markdown')
     bot.register_next_step_handler(call.message, handle_comprovante_pagamento)
 
-# Recebe o comprovante e libera o acesso
+@bot.message_handler(content_types=["photo", "document"])
 def handle_comprovante_pagamento(message):
-    if message.content_type in ['photo', 'document']:
-        bot.send_message(message.chat.id, "📥 Comprovante recebido! Verificando pagamento...")
+    if message.content_type in ["photo", "document"]:
+        bot.send_message(message.chat.id, "Comprovante recebido! ✅ Verificando pagamento...")
         liberar_acesso(message.chat.id)
     else:
-        bot.send_message(message.chat.id, "⚠️ Envie o comprovante como imagem ou arquivo.")
+        bot.send_message(message.chat.id, "❌ Envie o comprovante como imagem ou arquivo.")
 
-# Gera link exclusivo para o canal
 def liberar_acesso(chat_id):
     try:
-        link = bot.create_chat_invite_link(chat_id=CANAL_VIP, member_limit=1)
-        bot.send_message(
-            chat_id,
-            "🎉 Pagamento confirmado!\nClique abaixo para acessar o canal VIP:",
-            reply_markup=InlineKeyboardMarkup().add(
-                InlineKeyboardButton("🚪 Acessar Canal VIP", url=link.invite_link)
-            )
-        )
+        link = bot.create_chat_invite_link(chat_id=f"@{CANAL_USERNAME}", member_limit=1, expire_date=int(datetime.datetime.now().timestamp()) + 300)
+        bot.send_message(chat_id, "🔓 Pagamento confirmado!\nClique abaixo para acessar o canal VIP:", reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🚪 Acessar Canal VIP", url=link.invite_link)))
     except Exception as e:
         bot.send_message(chat_id, f"❌ Erro ao gerar link: {str(e)}")
 
-# Inicia o bot
-print("🤖 Bot está rodando...")
+# Iniciar bot
+print("Bot está rodando...")
 bot.infinity_polling()
